@@ -1,0 +1,21 @@
+# Local credentials and environment files
+.env
+.env.*
+
+# macOS metadata
+.DS_Store
+
+# Local API setup, credentials, backups and unfinished setup
+.ceu/
+*credentials*.json
+*credentials*.txt
+.secrets.md
+
+# The institution's supplied API document is local reference material.
+/docs/Academic-AI_api-docs-v2.0.pdf
+
+.venv/
+__pycache__/
+.pytest_cache/
+.ipynb_checkpoints/
+.ceu-save-*

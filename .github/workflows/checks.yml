@@ -1,0 +1,26 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.9"
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - run: uv run python -m unittest discover -s tests -v
+      - run: uv run ceu-ai.py --help
