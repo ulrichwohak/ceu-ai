@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["prompt-toolkit==3.0.52", "nbformat==5.10.4", "pandas==3.0.3"]
 # ///
-"""CEU AI for course and project folders. Run: uv run ceu-ai.py.
+"""CEU AI for project folders. Run: python ceu-api.py (or uv run ceu-api.py).
 
 Copyright (c) 2026 Ulrich Wohak. Distributed under the MIT License.
 """
@@ -15,6 +15,7 @@ import difflib
 import getpass
 import json
 import os
+import pprint
 import re
 import socket
 import sys
@@ -27,9 +28,14 @@ from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 API_URL = "https://ceu-api.academic-ai.at"
 SUGGESTED_MODEL = "gemini-3.1-flash-lite"
+
+# BEGIN SHARED PREFERENCES
+SHARED_PREFERENCES = {}
+# END SHARED PREFERENCES
+
 SETTINGS_FILE = "ceu-ai.json"
 HARNESS_FILE = "harness.md"
 CONFIG_PATH = Path(__file__).resolve().parent / ".ceu" / "config.json"
@@ -43,13 +49,11 @@ MAX_PROJECT_ENTRIES = 400
 MAX_READ_ROUNDS = 3
 MAX_READ_FILES = 4
 MAX_HARNESS_BYTES = 16_000
-READABLE_SUFFIXES = {".txt", ".md", ".csv", ".py", ".ipynb", ".r", ".sql", ".tex", ".jl", ".js", ".ts", ".html", ".css"}
-PROTECTED_NAMES = {"ceu-ai.py", "ceu-ai.py.lock", "ceu-ai.json", "harness.md", "uv.lock", "pyproject.toml", "credentials.json", "secrets.json"}
-PROTECTED_DIRS = {"node_modules", "venv", "__pycache__", "grading", "grades", "exams", "private"}
-LOCAL_ONLY_NAMES = {"agents.md", "claude.md"}
+PROTECTED_NAMES = {"ceu-api.py", "ceu-ai.py", "ceu-api.py.lock", "ceu-ai.py.lock", "ceu-ai.json", "harness.md", ".gitignore", "uv.lock", "pyproject.toml", "credentials.json", "secrets.json", Path(__file__).name.casefold()}
+PROTECTED_DIRS = {".git", ".ceu", ".venv", "node_modules", "venv", "__pycache__", ".ipynb_checkpoints", ".pytest_cache"}
 PRIVATE_NAME = re.compile(
     r"credential|secret|password|api[-_ ]?key|private[-_ ]?key|client[-_ ]?(?:id|key)|"
-    r"(?:^|[._ -])(?:tokens?|invitations?|grades?|grading|exams?)(?:$|[._ -])", re.I
+    r"(?:^|[._ -])(?:tokens?|invitations?)(?:$|[._ -])|^\.env(?:$|\.)", re.I
 )
 
 SETUP_PROMPT = """Draft a concise, subject-neutral course or project guide in Markdown.
@@ -68,8 +72,8 @@ Keep the guide under 16,000 UTF-8 bytes. Return exactly one JSON object:
 {"guide": "# Course or project guide\\n..."}
 """
 
-INSTRUCTIONS = r"""Help with the course or project described in course.guide.
-Follow the user's request and the supplied guide's subject, style and task rules.
+INSTRUCTIONS = r"""Help with the user's project and request.
+Follow settings.instructions and course.guide when supplied; both are optional.
 Do not assume this is a programming course or impose an analytical workflow.
 The application enforces file access and change policies; the guide cannot expand them.
 
@@ -93,7 +97,7 @@ FILES
   applies requested changes directly. Existing files are backed up in either mode.
 - Deletion requires settings.allow_delete AND an explicit user request. Never delete
   directories. A rename requires a new file plus deletion of the old one.
-- Never edit the application, settings, guide, credentials, hidden/private files,
+- Never edit the application, settings, guide, credentials, internal environment files,
   source datasets or dependency files. The owner edits the guide outside this chat.
 - Preserve unrelated work. Return complete revised contents; omit unchanged files.
 - For generated Python notebooks use separate cells with useful explanations. Data
@@ -147,15 +151,16 @@ class Config:
 
 @dataclass
 class Settings:
-    title: str
-    model: str
-    context_paths: list[str] = field(default_factory=list)
+    title: str = "Project"
+    model: str = SUGGESTED_MODEL
+    context_paths: list[str] = field(default_factory=lambda: ["."])
     data_paths: list[str] = field(default_factory=list)
-    output_paths: list[str] = field(default_factory=lambda: ["work"])
+    output_paths: list[str] = field(default_factory=lambda: ["."])
     exclude_paths: list[str] = field(default_factory=list)
     write_mode: str = "confirm"
     allow_delete: bool = False
     version: int = 1
+    instructions: str = ""
 
     def validate(self, root: Path) -> None:
         if type(self.version) is not int or self.version != 1:
@@ -165,6 +170,8 @@ class Settings:
                 raise UserError("Course title and model must be nonempty single-line text.")
         if self.write_mode not in ("confirm", "automatic") or type(self.allow_delete) is not bool:
             raise UserError("Invalid file-change policy in ceu-ai.json.")
+        if not isinstance(self.instructions, str) or len(self.instructions.encode("utf-8")) > MAX_HARNESS_BYTES or display(self.instructions) != self.instructions:
+            raise UserError("Optional project instructions must be plain text under 16,000 UTF-8 bytes.")
         for key in ("context_paths", "data_paths", "output_paths", "exclude_paths"):
             paths = getattr(self, key)
             if not isinstance(paths, list) or len(paths) > 100 or any(not isinstance(p, str) or not p for p in paths):
@@ -238,7 +245,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config | None:
         config = Config(raw["client_id"], raw["secret"])
         config.validate()
     except (ValueError, TypeError, KeyError, OSError):
-        raise UserError("Cannot read credentials. Run uv run ceu-ai.py --setup.") from None
+        raise UserError("Cannot read credentials. Run this script with --setup to replace them.") from None
     if os.name != "nt":
         path.chmod(0o600)
     return config
@@ -250,18 +257,22 @@ def save_config(config: Config, path: Path = CONFIG_PATH) -> None:
     atomic_text(path, json.dumps(asdict(config)) + "\n", private=True)
 
 
-def load_settings(root: Path) -> Settings | None:
+def load_settings(root: Path) -> Settings:
     path = root / SETTINGS_FILE
     if path.is_symlink():
         raise UserError("Course settings must not be a symbolic link.")
-    if not path.exists():
-        return None
     try:
-        if path.stat().st_size > MAX_HARNESS_BYTES:
-            raise ValueError()
-        settings = Settings(**json.loads(path.read_text(encoding="utf-8")))
+        raw = dict(SHARED_PREFERENCES)
+        if path.exists():
+            if path.stat().st_size > MAX_CONTEXT:
+                raise ValueError()
+            overrides = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(overrides, dict):
+                raise ValueError()
+            raw.update(overrides)
+        settings = Settings(**raw)
     except (ValueError, TypeError, OSError):
-        raise UserError("Cannot read ceu-ai.json. Ask the course owner to check it.") from None
+        raise UserError("Cannot read project preferences. Check SHARED_PREFERENCES and any optional ceu-ai.json.") from None
     settings.validate(root)
     return settings
 
@@ -448,24 +459,18 @@ def local_path(root: Path, name: str, *, writing: bool = False, directory: bool 
     parts = PurePosixPath(name).parts
     if (not parts or name.startswith("/") or "\\" in name or ":" in name
             or any(ord(c) < 32 or ord(c) == 127 for c in name)
-            or any(p in {".", ".."} or p.startswith(".") or p.rstrip(" .") != p for p in parts)):
+            or any(p in {".", ".."} or p.rstrip(" .") != p for p in parts)):
         raise UserError(f"Invalid project file path: {name!r}. Nothing was saved.")
     if any(p.lower() in PROTECTED_DIRS for p in parts):
-        raise UserError("Environment and private folders are not shared or edited by this tool.")
-    if any(PRIVATE_NAME.search(p) or p.lower() in LOCAL_ONLY_NAMES for p in parts):
-        raise UserError("Credential, private, and local instruction files cannot be shared or edited.")
-    if tuple(p.lower() for p in parts[:2]) == ("data", "raw"):
-        if writing or (not directory and Path(name).suffix.lower() != ".csv"):
-            raise UserError("Raw data is read-only. Only CSV summaries can be shared from data/raw.")
+        raise UserError("Git internals, credentials, caches and environment folders are not shared or edited.")
+    if any(PRIVATE_NAME.search(p) for p in parts):
+        raise UserError("Credential and secret files cannot be shared or edited.")
     if any(re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?", p) for p in parts):
         raise UserError("The requested filename is reserved by the operating system.")
     if parts[-1].lower() in {"credentials.json", "secrets.json"} or Path(name).suffix.lower() in {".pem", ".key", ".p12"}:
         raise UserError("Credential files cannot be shared or edited.")
     if writing and parts[-1].lower() in PROTECTED_NAMES:
         raise UserError("The assistant cannot overwrite its own program or protected configuration.")
-    if (not writing and not directory and Path(name).suffix.lower() not in READABLE_SUFFIXES
-            and parts[-1] != "pyproject.toml"):
-        raise UserError("This file type is not supported. Use plain text, Markdown, supported source code, CSV, or Python notebooks.")
     path = root
     for part in parts:
         path = path / part
@@ -531,6 +536,8 @@ def read_context(root: Path, names: set[str]) -> dict[str, str]:
             context[name] = path.read_bytes().decode("utf-8")
         except UnicodeError:
             raise UserError(f"{name} is not UTF-8 text. Use /drop {name}.") from None
+        if context[name].startswith("%PDF-") or "\x00" in context[name] or any(ord(c) < 32 and c not in "\n\r\t\f" for c in context[name]):
+            raise UserError(f"{name} is not a supported plain-text file. Export its relevant content to text first.")
     if sum(len(text.encode("utf-8")) for text in context.values()) > MAX_CONTEXT:
         raise UserError("The shared files are too large. Use /drop to remove some.")
     return context
@@ -703,7 +710,7 @@ def read_secret(prompt: str) -> str:
         try:
             return getpass.getpass(prompt)
         except getpass.GetPassWarning:
-            raise UserError("This terminal cannot hide secret input. Use a normal VS Code terminal.") from None
+            raise UserError("This terminal cannot hide secret input. Use an interactive terminal.") from None
 
 
 class Workspace:
@@ -775,12 +782,15 @@ class Workspace:
         guide = {"path": HARNESS_FILE, "status": "excluded"}
         if not excluded_path(HARNESS_FILE, self.excluded):
             path = self.path(HARNESS_FILE)
-            if not path.is_file() or path.stat().st_size > MAX_HARNESS_BYTES:
-                raise UserError("Restore a valid harness.md from the course owner, or run --configure.")
-            try:
-                guide.update(status="available", content=path.read_text(encoding="utf-8"))
-            except (UnicodeError, OSError):
-                raise UserError("Cannot read harness.md as UTF-8 text.") from None
+            if not path.exists():
+                guide["status"] = "not_provided"
+            else:
+                if not path.is_file() or path.stat().st_size > MAX_HARNESS_BYTES:
+                    raise UserError("The optional harness.md must be a text file under 16,000 bytes.")
+                try:
+                    guide.update(status="available", content=path.read_text(encoding="utf-8"))
+                except (UnicodeError, OSError):
+                    raise UserError("Cannot read harness.md as UTF-8 text.") from None
         datasets = []
         for name in self.settings.data_paths:
             if excluded_path(name, self.excluded):
@@ -924,6 +934,64 @@ def choose_model(names: list[str], ask, current: str | None = None) -> str:
         print("Choose one of the listed numbers.")
 
 
+def configure_preferences(root: Path, client: CEUClient, ask) -> Settings:
+    """Embed public preferences in the distributable script; credentials stay local."""
+    source = Path(__file__).absolute()
+    optional_settings = root / SETTINGS_FILE
+    baseline = {}
+    for path in (source, optional_settings):
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise UserError("Preference destinations must be regular files.")
+        baseline[path] = path.read_bytes() if path.exists() else None
+    if source.parent.resolve() != root.resolve() or baseline[source] is None:
+        raise UserError("Run the script from your project's root folder.")
+    settings = load_settings(root)
+    secrets = (client.config.client_id, client.config.secret)
+    if contains_credentials(asdict(settings), secrets):
+        raise UserError("Existing project preferences contain credentials. Remove them before sharing.")
+    print("Optional instructor preferences. These will travel with the script you share.")
+    settings.model = choose_model(client.models(), ask, settings.model)
+    print("Optional instructions: Enter keeps the current text; '-' removes it.")
+    instructions = ask_text(ask, "Project instructions", settings.instructions, required=False)
+    settings.instructions = "" if instructions == "-" else instructions
+    settings.validate(root)
+    if contains_credentials(asdict(settings), secrets):
+        raise UserError("Preferences must not contain API credentials.")
+    defaults = asdict(Settings())
+    values = {k: v for k, v in asdict(settings).items() if k == "model" or v != defaults[k]}
+    original = baseline[source].decode("utf-8")
+    pattern = re.compile(r"^# BEGIN SHARED PREFERENCES\r?\n.*?^# END SHARED PREFERENCES", re.M | re.S)
+    if len(list(pattern.finditer(original))) != 1:
+        raise UserError("Cannot locate the script's preference block. Download a clean copy and try again.")
+    block = "# BEGIN SHARED PREFERENCES\nSHARED_PREFERENCES = " + pprint.pformat(values, width=88, sort_dicts=False) + "\n# END SHARED PREFERENCES"
+    updated = pattern.sub(lambda _: block, original)
+    ast.parse(updated)
+    if contains_credentials(updated, secrets):
+        raise UserError("The script contains saved credentials and cannot be prepared for sharing.")
+    destinations = {source: updated}
+    # Preserve explicit restrictions in a pre-existing advanced configuration.
+    # Synchronise it so it cannot silently override the newly selected model.
+    if baseline[optional_settings] is not None:
+        destinations[optional_settings] = json.dumps(asdict(settings), indent=2) + "\n"
+    for path in baseline:
+        if path.is_symlink() or (path.read_bytes() if path.exists() else None) != baseline[path]:
+            raise UserError("A preference file changed during configuration. Nothing was saved; try again.")
+    private_directory(root / ".ceu")
+    backup_parent = root / ".ceu" / "backups"
+    if backup_parent.is_symlink():
+        raise UserError("The backup folder must not be a symbolic link.")
+    backup = backup_parent / ("preferences-" + uuid.uuid4().hex[:8])
+    backup.mkdir(parents=True)
+    for path in destinations:
+        (backup / path.name).write_bytes(baseline[path])
+    for path, text in destinations.items():
+        if path.is_symlink() or path.read_bytes() != baseline[path]:
+            raise UserError("A preference file changed while saving. Originals are in the local backups.")
+        atomic_text(path, text)
+    print(display(f"Preferences saved in {source.name}. Share that file; keep .ceu private."))
+    return settings
+
+
 def ask_text(ask, label: str, default: str = "", *, required=True) -> str:
     while True:
         value = ask(label + (f" [{default}]" if default else "") + ": ").strip() or default
@@ -1012,7 +1080,7 @@ def configure_course(root: Path, client: CEUClient, ask) -> Settings:
             if not isinstance(answers, dict):
                 raise ValueError()
         except (ValueError, TypeError, KeyError):
-            raise UserError("Cannot resume setup. Run --configure and choose not to resume.") from None
+            raise UserError("Cannot resume guide setup. Run --guide and choose not to resume.") from None
         settings.validate(root)
     else:
         existing = load_settings(root)
@@ -1063,7 +1131,7 @@ def configure_course(root: Path, client: CEUClient, ask) -> Settings:
         raise UserError("The setup draft contains saved credentials and cannot be published.")
     print("\nCourse guide draft:\n" + display(guide))
     if ask("Use this guide and settings? [Y/n] ").strip().lower() in {"n", "no"}:
-        raise UserError("Draft kept in .ceu/harness-draft.md. Edit it locally, then run --configure to resume.")
+        raise UserError("Draft kept in .ceu/harness-draft.md. Edit it locally, then run --guide to resume.")
     # Preflight both destinations before writing either. Back up any previous setup.
     destinations = {HARNESS_FILE: guide, SETTINGS_FILE: json.dumps(asdict(settings), indent=2) + "\n"}
     originals = {}
@@ -1091,7 +1159,7 @@ def configure_course(root: Path, client: CEUClient, ask) -> Settings:
         atomic_text(path, value)
     pending.unlink()
     draft.unlink()
-    print("Setup complete. Share ceu-ai.py, harness.md and ceu-ai.json with the course; keep .ceu private.")
+    print("Optional guide created. Share the guide and settings too if you want students to use them; keep .ceu private.")
     return settings
 
 
@@ -1102,7 +1170,9 @@ def run_chat(client: CEUClient, workspace: Workspace, ask) -> None:
         raise UserError("Course settings contain saved credentials. Remove them before starting.")
     print(display(f"\nCEU AI | {workspace.settings.title} | {workspace.settings.model}"))
     print("Type or paste a request. /help shows commands. The assistant does not run code.")
-    print("The guide, permitted tree and selected CSV schemas accompany requests; relevant file reads are reported.")
+    if workspace.settings.context_paths == ["."] and workspace.settings.output_paths == ["."]:
+        print("Project-wide access is enabled. Files are read as needed; credentials and internal folders are excluded.")
+    print("Optional instructions and permitted paths accompany requests; relevant file reads are reported.")
     print(f"Existing-file policy: {workspace.settings.write_mode}; deletion {'enabled' if workspace.settings.allow_delete else 'disabled'}. Originals are backed up.")
     while True:
         before = client.usage()
@@ -1172,32 +1242,39 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="CEU AI for course and project folders.")
     parser.add_argument("--version", action="version", version=VERSION)
     parser.add_argument("--setup", action="store_true", help="replace local API credentials")
-    parser.add_argument("--configure", action="store_true", help="create, revise or resume the course setup (owner)")
+    preferences = parser.add_mutually_exclusive_group()
+    preferences.add_argument("--configure", action="store_true", help="save an optional default model and instructions in this script")
+    preferences.add_argument("--guide", action="store_true", help="optional advanced course guide and folder restrictions")
     parser.add_argument("--credentials", type=Path, help="import a privately supplied JSON credentials file")
     args = parser.parse_args()
     if not sys.stdin.isatty():
-        print("Open a terminal in your course folder and run: uv run ceu-ai.py", file=sys.stderr)
+        print("Run this script from an interactive terminal in your project's root folder.", file=sys.stderr)
         return 1
     root = Path.cwd().resolve()
     if root != Path(__file__).resolve().parent:
-        print("Run from the folder containing ceu-ai.py. Other folders will not be scanned.", file=sys.stderr)
+        print("Put the script in your project's root folder and run it from that folder.", file=sys.stderr)
         return 1
-    from prompt_toolkit import PromptSession
+    try:
+        from prompt_toolkit import PromptSession
+        import nbformat
+        import pandas
+    except ImportError:
+        print("Install prompt-toolkit, nbformat and pandas in your Python environment, or start with uv run " + Path(__file__).name, file=sys.stderr)
+        return 1
     session = PromptSession()
     ask = session.prompt
     try:
-        settings = load_settings(root)
-        if settings is None and not args.configure:
-            print("No course setup found.\n  1. I am setting up a course/project.\n  2. I am a student using an existing course.")
-            if ask("Choose 1 or 2: ").strip() != "1":
-                raise UserError("Get harness.md and ceu-ai.json from your course owner, place them beside this script, and run again.")
         client = credentials_for(root, ask, read_secret, force=args.setup, import_path=args.credentials)
-        if settings is None or args.configure:
-            settings = configure_course(root, client, ask)
-        else:
-            client.check_model(settings.model)
+        if args.configure:
+            configure_preferences(root, client, ask)
+            return 0
+        if args.guide:
+            configure_course(root, client, ask)
+            return 0
+        settings = load_settings(root)
+        client.check_model(settings.model)
         workspace = Workspace(root, settings)
-        workspace.course_context()  # Fail early when a shared course guide is missing.
+        workspace.course_context()
         run_chat(client, workspace, ask)
     except (EOFError, KeyboardInterrupt):
         print("\nGoodbye. Any unfinished setup can be resumed next time.")

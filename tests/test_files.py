@@ -20,9 +20,9 @@ from urllib.error import HTTPError, URLError
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "ceu-ai.py"
+MODULE = ROOT / "ceu-api.py"
 if not MODULE.exists():
-    MODULE = Path(__file__).with_name("ceu-ai.py")
+    MODULE = Path(__file__).with_name("ceu-api.py")
 spec = importlib.util.spec_from_file_location("ceu", MODULE)
 ceu = importlib.util.module_from_spec(spec)
 sys.modules["ceu"] = ceu
@@ -87,7 +87,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_deletion_rejects_directories_missing_files_and_protected_paths_before_writes(self):
         (self.root / "folder").mkdir()
         for name in ("folder", "missing.py", "../outside.py", ".git/config", "harness.md",
-                     "ceu-ai.py", "data/raw/source.csv", "ceu-api-credentials.txt"):
+                     "ceu-api.py", "data/raw/source.csv", "ceu-api-credentials.txt"):
             with self.subTest(name=name), self.assertRaises(ceu.UserError):
                 ceu.apply_files(self.root, [{"path": "new.py", "content": "x = 1"}],
                                 emit=self.output.append, delete_files=[name])
@@ -143,7 +143,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_unsafe_paths_are_rejected_before_any_write(self):
         for name in ("../escape.py", "/tmp/escape.py", "C:\\escape.py", ".env", ".ceu/config.json",
-                     "nested/.secrets.md", "data/raw/data.csv", "credentials.json", "key.pem", "ceu-ai.py",
+                     "nested/.secrets.md", "credentials.json", "key.pem", "ceu-api.py", "ceu-ai.py",
                      "NUL.py", "hello\x1b.py"):
             with self.subTest(name=name), self.assertRaises(ceu.UserError):
                 self.apply([{"path": "good.py", "content": "x = 1"}, {"path": name, "content": "x = 2"}])
@@ -237,8 +237,8 @@ class WorkspaceTests(unittest.TestCase):
         with patch.object(ceu, "MAX_CONTEXT", 100), self.assertRaisesRegex(ceu.UserError, "shared files are too large"):
             ceu.read_context(self.root, {"small.csv"})
 
-    def test_csv_read_access_does_not_weaken_path_or_raw_write_protection(self):
-        for name in ("../outside.csv", ".ceu/config.csv", "data/raw/notes.txt", "venv/data.csv", "secret.key"):
+    def test_csv_read_access_preserves_secret_boundary_and_existing_data(self):
+        for name in ("../outside.csv", ".ceu/config.csv", "venv/data.csv", "secret.key"):
             with self.subTest(name=name), self.assertRaises(ceu.UserError):
                 ceu.read_context(self.root, {name})
         with tempfile.TemporaryDirectory() as outside:
@@ -246,6 +246,9 @@ class WorkspaceTests(unittest.TestCase):
             with self.assertRaises(ceu.UserError):
                 ceu.read_context(self.root, {"linked.csv"})
         for name in ("data/raw/hotels.csv", "Data/Raw/hotels.csv"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("original\n1\n", newline="\n")
             with self.subTest(name=name), self.assertRaises(ceu.UserError):
                 self.apply([{"path": "good.py", "content": "x = 1"}, {"path": name, "content": "a\n1\n"}])
         self.assertFalse((self.root / "good.py").exists())

@@ -1,7 +1,8 @@
-# The built-in setup prompt
+# Optional guide-generation prompt
 
-Run `uv run ceu-ai.py` in a new course or project and choose the instructor option.
-For an existing setup, run `uv run ceu-ai.py --configure`.
+Normal startup only asks for credentials and opens chat. For an optional AI-drafted
+course guide and folder restrictions, run `python ceu-api.py --guide` (or
+`uv run ceu-api.py --guide`). To resume unfinished guide setup, use `--guide` again.
 
 The application asks for the audience, intended tasks, working rules, approved
 paths, model and file-change policy. It then sends the prompt below with those
@@ -9,7 +10,7 @@ answers, a filtered file tree, selected text references and any CSV schemas.
 Review the resulting `harness.md` before accepting it. No separate AI account or
 external coding assistant is needed; guide generation uses your CEU API allowance.
 
-This is an exact copy of `SETUP_PROMPT` in `ceu-ai.py`; a test keeps it in sync.
+This is an exact copy of `SETUP_PROMPT` in `ceu-api.py`; a test keeps it in sync.
 
 ```text
 Draft a concise, subject-neutral course or project guide in Markdown.

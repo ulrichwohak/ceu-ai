@@ -60,7 +60,7 @@ class AppTests(unittest.TestCase):
             ceu.load_settings(self.root)
 
     def test_settings_reject_unsafe_scopes_and_invalid_versions(self):
-        for name in ('../outside', '.env', 'private', '/tmp', 'foo/../bar', 'foo//bar'):
+        for name in ('../outside', '.env', '.ceu', '/tmp', 'foo/../bar', 'foo//bar'):
             with self.subTest(name=name), self.assertRaises(ceu.UserError):
                 ceu.Settings('Example', 'model', [name]).validate(self.root)
         for version in (True, 2, '1'):
@@ -130,7 +130,7 @@ class AppTests(unittest.TestCase):
 
     def test_metadata_and_program_cannot_be_changed_even_with_root_output(self):
         self.settings.output_paths = ['.']
-        for name in ('harness.md', 'ceu-ai.json', 'ceu-ai.py', 'pyproject.toml', 'uv.lock'):
+        for name in ('harness.md', 'ceu-ai.json', 'ceu-api.py', 'pyproject.toml', 'uv.lock'):
             with self.subTest(name=name), self.assertRaises(ceu.UserError):
                 self.workspace().path(name, writing=True)
 
@@ -344,9 +344,9 @@ class AppTests(unittest.TestCase):
         self.file('ceu-ai.json', json.dumps(ceu.asdict(self.settings)))
         client = self.client()
         session = Mock(prompt=Mock(return_value='/quit'))
-        with patch.object(ceu, '__file__', str(self.root / 'ceu-ai.py')), \
+        with patch.object(ceu, '__file__', str(self.root / 'ceu-api.py')), \
              patch.object(ceu.Path, 'cwd', return_value=self.root), \
-             patch.object(ceu.sys, 'argv', ['ceu-ai.py']), \
+             patch.object(ceu.sys, 'argv', ['ceu-api.py']), \
              patch.object(ceu.sys.stdin, 'isatty', return_value=True), \
              patch('prompt_toolkit.PromptSession', return_value=session), \
              patch.object(ceu, 'credentials_for', return_value=client), \
@@ -392,19 +392,30 @@ class AppTests(unittest.TestCase):
         with self.assertRaisesRegex(ceu.InvalidSourceError, 'Python notebooks'):
             ceu.validate_source('work/example.ipynb', json.dumps(nb))
 
-    def test_student_without_course_files_does_not_request_credentials(self):
-        session = Mock(prompt=Mock(return_value='2'))
+    def test_plain_startup_only_asks_for_credentials_then_opens_chat(self):
+        (self.root / 'harness.md').unlink()
+        session = Mock(prompt=Mock(side_effect=['test-client-id', '/quit']))
         output = io.StringIO()
-        with patch.object(ceu, '__file__', str(self.root / 'ceu-ai.py')), \
+        with patch.object(ceu, '__file__', str(self.root / 'ceu-api.py')), \
              patch.object(ceu.Path, 'cwd', return_value=self.root), \
-             patch.object(ceu.sys, 'argv', ['ceu-ai.py']), \
+             patch.object(ceu.sys, 'argv', ['ceu-api.py']), \
              patch.object(ceu.sys.stdin, 'isatty', return_value=True), \
              patch('prompt_toolkit.PromptSession', return_value=session), \
-             patch.object(ceu, 'credentials_for') as credentials, \
-             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(output):
-            self.assertEqual(ceu.main(), 1)
-            credentials.assert_not_called()
-        self.assertIn('Get harness.md and ceu-ai.json', output.getvalue())
+             patch.object(ceu, 'read_secret', return_value='test-client-secret') as secret, \
+             patch.object(ceu.CEUClient, 'models', return_value=[ceu.SUGGESTED_MODEL]), \
+             patch.object(ceu.CEUClient, 'complete', side_effect=AssertionError('Unexpected paid request')), \
+             patch.object(ceu, 'configure_course') as guide, \
+             patch.object(ceu, 'configure_preferences') as preferences, \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(ceu.main(), 0)
+            guide.assert_not_called()
+            preferences.assert_not_called()
+            secret.assert_called_once()
+        self.assertEqual([c.args[0] for c in session.prompt.call_args_list], ['Client ID: ', 'You> '])
+        self.assertIn('Project-wide access', output.getvalue())
+        self.assertFalse((self.root / 'ceu-ai.json').exists())
+        self.assertFalse((self.root / 'harness.md').exists())
+        self.assertEqual(ceu.load_config(self.root / '.ceu/config.json').client_id, 'test-client-id')
 
     def test_declined_changes_are_not_claimed_as_saved_in_chat_history(self):
         self.file('work/notes.md', 'Original')
