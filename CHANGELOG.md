@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 - 2026-11-23
+
+- Chat reads text from local PDFs and preserves page numbers in the context sent to CEU. The script reports scanned, encrypted or unreadable PDFs and explains how to proceed.
+
 ## 0.2.2 - 2026-11-23
 
 - Running the script sets up missing Python packages in a local environment on first use.

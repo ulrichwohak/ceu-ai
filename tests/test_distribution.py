@@ -54,8 +54,8 @@ class DistributionTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ceu.UserError):
                 workspace.path(name)
 
-    def test_binary_and_pdf_files_fail_without_guessing_their_contents(self):
-        for name, content in [('image.png', b'\x89PNG\0'), ('document.pdf', b'%PDF-1.4\n')]:
+    def test_unhandled_binary_files_fail_without_guessing_their_contents(self):
+        for name, content in [('image.png', b'\x89PNG\0'), ('document.txt', b'%PDF-1.4\n')]:
             path = self.file(name, '')
             path.write_bytes(content)
             with self.subTest(name=name), self.assertRaises(ceu.UserError):

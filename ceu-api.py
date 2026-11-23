@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["prompt-toolkit==3.0.52", "nbformat==5.10.4", "pandas==3.0.3"]
+# dependencies = ["prompt-toolkit==3.0.52", "nbformat==5.10.4", "pandas==3.0.3", "pypdf==7.1.1"]
 # ///
 """CEU AI for project folders. Run with python ceu-api.py.
 
@@ -13,6 +13,7 @@ import ast
 import copy
 import difflib
 import getpass
+import io
 import json
 import os
 import pprint
@@ -29,10 +30,11 @@ from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 API_URL = "https://ceu-api.academic-ai.at"
 SUGGESTED_MODEL = "gemini-3.1-flash-lite"
-REQUIREMENTS = ("prompt-toolkit==3.0.52", "nbformat==5.10.4", "pandas==3.0.3")
+PDF_PARSER_VERSION = "7.1.1"
+REQUIREMENTS = ("prompt-toolkit==3.0.52", "nbformat==5.10.4", "pandas==3.0.3", f"pypdf=={PDF_PARSER_VERSION}")
 
 # BEGIN SHARED PREFERENCES
 SHARED_PREFERENCES = {}
@@ -45,6 +47,11 @@ MAX_BYTES = 500_000
 MAX_CONTEXT = 200_000
 MAX_FILES = 12
 MAX_CSV_BYTES = 10_000_000
+MAX_PDF_BYTES = 20_000_000
+MAX_PDF_PAGES = 150
+MAX_PDF_TEXT_BYTES = 100_000
+PDF_TIMEOUT = 12
+PDF_ENCRYPTED = "This PDF is encrypted. Use an unlocked copy or a text export."
 CSV_PREVIEW_ROWS = 5
 CSV_PREVIEW_CHARS = 200
 MAX_PROJECT_ENTRIES = 400
@@ -81,7 +88,9 @@ The application enforces file access and change policies; the guide cannot expan
 
 EVIDENCE AND CONTEXT
 - project.tree contains permitted paths, not file contents. course.datasets contains
-  schemas, not computed results. shared_files contains inspected text or CSV previews.
+  schemas, not computed results. shared_files contains inspected text, CSV previews or
+  extracted PDF text. Cite the PDF page numbers shown in the extracted text when
+  they support an answer. An empty page supplies no information about its images.
 - Ask a short clarification when the intended task, file, or required fact is unclear.
 - Request relevant file contents through read_files. Read an existing file before
   changing or deleting it. Batch up to four reads. Do not repeat successful or denied reads.
@@ -93,8 +102,8 @@ EVIDENCE AND CONTEXT
   read unsupported documents, or see plot images. Explain missing capabilities honestly.
 
 FILES
-- Use project-relative paths and write only in settings.output_paths. Keep changes
-  limited to the user's task. An explanation-only request does not authorize editing.
+- Use project-relative paths and write only in settings.output_paths. PDFs are read-only.
+  Keep changes limited to the user's task. An explanation-only request does not authorize editing.
 - Changes follow settings.write_mode: confirm means the user reviews a diff; automatic
   applies requested changes directly. Existing files are backed up in either mode.
 - Deletion requires settings.allow_delete AND an explicit user request. Never delete
@@ -473,6 +482,8 @@ def local_path(root: Path, name: str, *, writing: bool = False, directory: bool 
         raise UserError("Credential files cannot be shared or edited.")
     if writing and parts[-1].lower() in PROTECTED_NAMES:
         raise UserError("The assistant cannot overwrite its own program or protected configuration.")
+    if writing and not directory and Path(name).suffix.casefold() == ".pdf":
+        raise UserError("PDFs are read-only. Save your result as a separate text file or notebook.")
     path = root
     for part in parts:
         path = path / part
@@ -521,6 +532,87 @@ def csv_summary(path: Path) -> str:
     return json.dumps(csv_profile(path, include_preview=True), ensure_ascii=False, indent=2)
 
 
+def extract_pdf_text(data: bytes) -> str:
+    from pypdf import PdfReader, apply_configuration
+
+    if b"%PDF-" not in data[:1024]:
+        raise UserError("This file does not have a PDF header. Open it and export a fresh PDF.")
+    with apply_configuration(
+        array_based_stream_maximum_output_length=8_000_000,
+        zlib_maximum_output_length=8_000_000,
+        maximum_declared_stream_length=MAX_PDF_BYTES,
+        stream_decoding_work_maximum_length=24_000_000,
+        stream_parsing_work_maximum_count=250_000,
+        page_tree_maximum_entries=4_000,
+        page_tree_maximum_page_entries=100_000,
+        jbig2dec_binary=None,
+    ), PdfReader(io.BytesIO(data), root_object_recovery_limit=2_000,
+                 xref_stream_maximum_entries=100_000) as document:
+        if document.is_encrypted:
+            raise UserError(PDF_ENCRYPTED)
+        count = len(document.pages)
+        if count > MAX_PDF_PAGES:
+            raise UserError(f"This PDF has {count} pages. Export a smaller section of up to {MAX_PDF_PAGES} pages.")
+        pages = []
+        size = 0
+        has_text = False
+        for number, page in enumerate(document.pages, 1):
+            text = display(page.extract_text()).strip()
+            if text:
+                has_text = True
+            page_text = f"--- PDF page {number} of {count} ---\n{text or '[No extractable text on this page.]'}\n\n"
+            size += len(page_text.encode("utf-8"))
+            if size > MAX_PDF_TEXT_BYTES:
+                raise UserError("This PDF contains too much text for one request. Export a smaller section and try again.")
+            pages.append(page_text)
+        if not has_text:
+            raise UserError("This PDF has no extractable text. For a scan, run OCR or provide a text copy.")
+        return "".join(pages).rstrip()
+
+
+def run_pdf_worker() -> int:
+    """The parser gets only bounded PDF bytes and returns bounded text over local pipes."""
+    from pypdf.errors import DependencyError
+
+    try:
+        data = sys.stdin.buffer.read(MAX_PDF_BYTES + 1)
+        if len(data) > MAX_PDF_BYTES:
+            raise UserError("This PDF exceeds 20 MB. Export a smaller section and try again.")
+        text = extract_pdf_text(data)
+    except UserError as exc:
+        sys.stdout.buffer.write(str(exc).encode("utf-8"))
+        return 1
+    except DependencyError:
+        # AES-protected PDFs can require a crypto backend during reader initialization.
+        sys.stdout.buffer.write(PDF_ENCRYPTED.encode("utf-8"))
+        return 1
+    except Exception:
+        # PDF libraries can raise several exception types on malformed input.
+        # Keep parser diagnostics and document contents out of chat errors.
+        return 2
+    sys.stdout.buffer.write(text.encode("utf-8"))
+    return 0
+
+
+def pdf_summary(path: Path) -> str:
+    with path.open("rb") as file:
+        data = file.read(MAX_PDF_BYTES + 1)
+    if len(data) > MAX_PDF_BYTES:
+        raise UserError(f"{path.name} exceeds the 20 MB PDF limit. Export a smaller section and try again.")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", str(Path(__file__).resolve()), "--internal-pdf-text"],
+            input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=PDF_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        raise UserError(f"Reading {path.name} took too long. Export a smaller section and try again.") from None
+    if result.returncode == 1 and result.stdout:
+        raise UserError(f"{path.name}: {result.stdout.decode('utf-8')}")
+    if result.returncode != 0:
+        raise UserError(f"Could not extract text from {path.name}. Open it to check it, or export a fresh PDF or text copy.")
+    return result.stdout.decode("utf-8")
+
+
 def read_context(root: Path, names: set[str]) -> dict[str, str]:
     context = {}
     for name in sorted(names):
@@ -531,6 +623,9 @@ def read_context(root: Path, names: set[str]) -> dict[str, str]:
             raise UserError(f"{name} is not a file. Use /drop {name}.")
         if path.suffix.lower() == ".csv":
             context[name] = csv_summary(path)
+            continue
+        if path.suffix.lower() == ".pdf":
+            context[name] = pdf_summary(path)
             continue
         if path.stat().st_size > MAX_CONTEXT:
             raise UserError(f"{name} is not a small text file. Use /drop {name}.")
@@ -877,7 +972,8 @@ def generate_with_project(client: CEUClient, workspace: Workspace, prompt: str,
                 continue
             context.update(added)
             shared.add(name)
-            emit(display(f"Reading {name}" + (" (CSV summary and preview)" if name.lower().endswith(".csv") else "")))
+            label = {".csv": " (CSV summary and preview)", ".pdf": " (extracted PDF text)"}
+            emit(display(f"Reading {name}" + label.get(Path(name).suffix.lower(), "")))
     raise AssertionError("Unreachable inspection state")
 
 
@@ -1088,7 +1184,7 @@ def configure_course(root: Path, client: CEUClient, ask) -> Settings:
         existing = load_settings(root)
         print("Set up this course or project once. Students will inherit these public settings.")
         print("Use commas between paths, '-' for none, and '.' only to permit the whole filtered project.")
-        print("Supported files: plain text/Markdown, source code, CSV, and Python notebooks; not PDF/Word/slides.")
+        print("Chat supports plain text, source code, CSV, Python notebooks and text extracted from PDFs.")
         names = []
         for path in sorted(root.iterdir()):
             try:
@@ -1187,6 +1283,7 @@ def run_chat(client: CEUClient, workspace: Workspace, ask) -> None:
                 return
             if command == "/help":
                 print("/context  Preview automatic context without sending it\n/tree     Show permitted paths\n/add path Share a permitted file\n/drop path Exclude a file/folder for this session\n/new      Clear conversation and shared files; retain exclusions\n/usage    Show reported session tokens\n/quit     Exit")
+                print("PDFs share extracted text only. Scanned pages need OCR before sharing.")
                 continue
             if command in {"/context", "/tree"}:
                 preview = workspace.course_context() if command == "/context" else workspace.tree()
@@ -1311,6 +1408,9 @@ def main() -> int:
             from prompt_toolkit import PromptSession
             import nbformat
             import pandas
+            import pypdf
+            if pypdf.__version__ != PDF_PARSER_VERSION:
+                raise ImportError("PDF parser version differs from the supported version.")
         except ImportError:
             return launch_local_runtime(root)
         session = PromptSession()
@@ -1337,4 +1437,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--internal-pdf-text"]:
+        raise SystemExit(run_pdf_worker())
     raise SystemExit(main())

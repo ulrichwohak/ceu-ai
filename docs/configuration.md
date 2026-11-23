@@ -53,7 +53,7 @@ Each chat call sends the application instructions plus a JSON description of:
 - Public course settings and the current guide.
 - A filtered tree of permitted paths, capped at 400 entries.
 - Automatically selected CSV schemas, without previews.
-- Explicitly shared or model-requested file contents. CSVs contribute a schema and up to five preview rows; notebooks contribute their saved text, including outputs.
+- Explicitly shared or model-requested file contents. CSVs contribute a schema and up to five preview rows. Notebooks contribute saved text, including outputs. PDFs contribute locally extracted text with page numbers.
 - Any previous read errors or the rejected response needed for a correction.
 
 Previously shared files are refreshed from disk on each user request. Successfully generated files join the context for follow-up requests. Long conversations resend history and can increase input-token usage; `/new` starts fresh. Requests stay in memory locally, but this says nothing about CEU/provider retention. Confirm data handling requirements with CEU IT.
@@ -64,7 +64,9 @@ The client ID and secret go in authentication headers, not the model prompt. The
 
 All ordinary project folders and UTF-8 text formats are accessible by default, including `.github`, `.vscode`, files without extensions, and course folders such as `grading` or `exams`. Add optional exclusions if you do not want them available. `AGENTS.md` and `CLAUDE.md` can be read as project text; they do not gain authority to override the user's request or application rules.
 
-The program rejects paths outside the project, traversal, symbolic links, credential-like names, `.env` files, Git internals, its local `.ceu` folder, caches and environment directories. It blocks model changes to the app, guide, settings, `.gitignore` and protected dependency files. Existing CSV files remain read-only and are represented by summaries. There is no special restriction on a folder simply because it is called `data/raw`. Binary formats such as PDF and Word are not parsed; export relevant content to text.
+The program rejects paths outside the project, traversal, symbolic links, credential-like names, `.env` files, Git internals, its local `.ceu` folder, caches and environment directories. It blocks model changes to the app, guide, settings, `.gitignore` and protected dependency files. PDFs and existing CSV files are read-only. There is no special restriction on a folder simply because it is called `data/raw`. Export Word and other unsupported formats to text.
+
+PDF extraction runs locally with a timeout. Page numbers count from the first page of the file. Images and scans without a text layer require OCR or a text copy. A PDF with both text and image-only pages supplies its available text, with a marker for each page with no extractable text. For encrypted or damaged files, use an unlocked copy or export a fresh PDF.
 
 An existing file must be read before the model can revise or delete it. The application validates the proposed batch before changes, detects editor changes made while the response or confirmation was pending, and saves originals under `.ceu/backups/`. A declined review cancels the whole proposed batch, including any new files. New-file-only proposals are saved without a confirmation.
 
@@ -96,6 +98,8 @@ Local usage is informational. It is not a billing statement, course-wide aggrega
 | API response body | 500,000 bytes |
 | CSV read locally for profiling | 10,000,000 bytes |
 | CSV preview | First 5 rows; each text value truncated after 200 characters |
+| PDF read locally | 20 MB and 150 pages per PDF |
+| PDF extract | 100,000 UTF-8 bytes and a 12-second parser timeout per PDF |
 | Proposed writes/deletions in one reply | 12 files |
 | Network timeout | 120 seconds |
 

@@ -48,13 +48,15 @@ Without instructor preferences, the default model is `gemini-3.1-flash-lite`. If
 
 ## What the assistant can access
 
-By default, all project folders are in scope, including nested folders and ordinary hidden project files such as `.github/workflows/`. Any bounded UTF-8 text file can be read, regardless of extension. CSVs are supplied as schemas and up to five preview rows; notebooks are read as saved, including any outputs.
+By default, all project folders are in scope, including nested folders and ordinary hidden project files such as `.github/workflows/`. The script reads UTF-8 text files within its size limits. CSVs are supplied as schemas and up to five preview rows; notebooks are read as saved, including any outputs.
+
+To use a PDF, ask the assistant to read it by name or type `/add "readings/week 2.pdf"` in chat. The script extracts selectable text and page numbers locally and sends that text to CEU. Charts and images are outside the extract. For scans, use an OCR version or a text export. If a PDF exceeds the [local limits](docs/configuration.md#current-local-limits), export the pages you need as a smaller PDF.
 
 Credentials, Git internals, virtual environments and caches are excluded. Paths outside the project and symbolic links are blocked. The application, its shared preferences, optional course configuration, `.gitignore` and protected dependency files cannot be overwritten by model replies. Existing CSV datasets remain read-only. These protections do not require a folder-selection wizard.
 
 File paths, optional instructions and the current conversation accompany requests. The terminal reports model-requested reads. Only use project material you are allowed to send through the API. The program detects its saved CEU credentials in context, but it is not a general detector of every kind of private information.
 
-New files are saved directly. Replacing existing files requires a diff review by default and keeps originals in `.ceu/backups/`. The model must read an existing file before changing it. Deletion is disabled by default. There is no code execution, shell, web browsing or image inspection; PDF, Word, PowerPoint and other binary formats must first be exported to text.
+New files are saved directly. Replacing existing files requires a diff review by default and keeps originals in `.ceu/backups/`. The model must read an existing file before changing it. Deletion is disabled by default. PDFs are read-only. Export Word, PowerPoint and other unsupported formats to text. Run generated code yourself.
 
 ## Useful commands
 
@@ -111,7 +113,7 @@ Updating is deliberate: a fresh generic download does not contain your instructo
 Activate a development environment and run the following commands from the repository root.
 
 ```sh
-python -m pip install prompt-toolkit==3.0.52 nbformat==5.10.4 pandas==3.0.3
+python -m pip install prompt-toolkit==3.0.52 nbformat==5.10.4 pandas==3.0.3 pypdf==7.1.1
 python -m unittest discover -s tests -v
 ```
 
