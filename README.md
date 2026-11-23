@@ -19,7 +19,7 @@ Use Python 3.11 or later on Windows, macOS or Linux. If your Python command is `
 python -I ceu-api.py
 ```
 
-The `-I` flag keeps local project files from interfering with Python startup. If packages are missing in this mode, the script creates an environment under `.ceu/runtime`, installs the packages there, and continues automatically. The first download needs internet access and a Python installation with `venv`.
+This command sets up chat, PDF reading and the other file features together. If packages are missing, the script installs them under `.ceu/runtime` and continues automatically. The first package download needs internet access and a Python installation with `venv`. Keep the `-I` flag so local project files cannot interfere with startup.
 
 Now type a request, for example:
 

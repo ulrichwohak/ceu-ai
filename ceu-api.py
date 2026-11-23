@@ -10,29 +10,10 @@ from __future__ import annotations
 
 import sys
 
-
-def run_terminal_child(command: list[str]) -> int:
-    import subprocess
-
-    with subprocess.Popen(command) as child:
-        while True:
-            try:
-                return child.wait()
-            except KeyboardInterrupt:
-                # The terminal also sends Ctrl-C to the interactive child.
-                continue
-
-
-# Keep the original launch command working. Remove the default script directory
-# before importing anything for the isolated relaunch.
+# Check this before importing modules that a project file could shadow.
 if __name__ == "__main__" and not sys.flags.isolated:
-    if not getattr(sys.flags, "safe_path", False):
-        sys.path.pop(0)
-    import os
-
-    project_paths = {os.path.realpath(os.curdir), os.path.dirname(os.path.realpath(__file__))}
-    sys.path[:] = [entry for entry in sys.path if os.path.realpath(entry) not in project_paths]
-    raise SystemExit(run_terminal_child([sys.executable, "-I", *sys.argv]))
+    print("Run CEU AI with: python -I ceu-api.py", file=sys.stderr)
+    raise SystemExit(2)
 
 import argparse
 import ast
@@ -56,7 +37,7 @@ from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 API_URL = "https://ceu-api.academic-ai.at"
 SUGGESTED_MODEL = "gemini-3.1-flash-lite"
 PDF_PARSER_VERSION = "7.1.1"
@@ -1398,6 +1379,16 @@ def run_chat(client: CEUClient, workspace: Workspace, ask) -> None:
             print("\nCancelled. Type /quit to exit.")
         finally:
             client.report_usage(before)
+
+
+def run_terminal_child(command: list[str]) -> int:
+    with subprocess.Popen(command) as child:
+        while True:
+            try:
+                return child.wait()
+            except KeyboardInterrupt:
+                # The terminal also sends Ctrl-C to the interactive child.
+                continue
 
 
 def launch_local_runtime(root: Path) -> int:
