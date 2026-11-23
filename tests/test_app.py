@@ -386,6 +386,66 @@ class AppTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(Path(ceu.__file__)), option], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_launch_ignores_project_files_named_like_python_modules(self):
+        script = self.root / 'ceu-api.py'
+        script.write_bytes(Path(ceu.__file__).read_bytes())
+        self.file('socket.py', '# An unrelated file in the course folder.\n')
+        for flags in ([], ['-I']):
+            with self.subTest(flags=flags):
+                result = subprocess.run([sys.executable, *flags, str(script), '--version'],
+                                        cwd=self.root, env={**os.environ, 'PYTHONPATH': str(self.root)},
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), ceu.VERSION)
+
+    def test_folder_permissions_follow_the_filesystem(self):
+        allowed = 'materials/Readings/notes.txt'
+        alternate = 'materials/readings/notes.txt'
+        self.file(allowed, 'Assigned reading')
+        case_insensitive = (self.root / alternate).exists()
+        if not case_insensitive:
+            self.file(alternate, 'A distinct reading')
+        settings = ceu.Settings(context_paths=['materials/Readings'], output_paths=['materials/Readings'])
+        workspace = ceu.Workspace(self.root, settings)
+        if case_insensitive:
+            self.assertEqual(workspace.read({alternate})[alternate], 'Assigned reading')
+            self.assertEqual(workspace.path('materials/readings/new.txt', writing=True).name, 'new.txt')
+        else:
+            with self.assertRaisesRegex(ceu.UserError, 'outside the configured context'):
+                workspace.read({alternate})
+            with self.assertRaisesRegex(ceu.UserError, 'outside the configured output'):
+                workspace.path('materials/readings/new.txt', writing=True)
+            self.assertNotIn(alternate, workspace.tree()['tree'])
+        workspace = ceu.Workspace(self.root, ceu.Settings(exclude_paths=['materials/Readings']))
+        if case_insensitive:
+            with self.assertRaisesRegex(ceu.UserError, 'excluded'):
+                workspace.read({alternate})
+        else:
+            self.assertEqual(workspace.read({alternate})[alternate], 'A distinct reading')
+        future = ceu.Workspace(self.root, ceu.Settings(exclude_paths=['work/Private.txt']))
+        with self.assertRaisesRegex(ceu.UserError, 'excluded'):
+            future.path('work/private.txt', writing=True)
+
+    def test_renamed_shared_file_is_reported_once_and_chat_continues(self):
+        gone = self.file('materials/notes.txt', 'Old notes')
+        self.file('materials/keep.txt', 'Still available')
+        shared = {'materials/notes.txt', 'materials/keep.txt'}
+        gone.rename(gone.with_name('archived.txt'))
+        client = self.client([{'message': 'First response', 'files': []},
+                              {'message': 'Next response', 'files': []}])
+        emitted = []
+        workspace = self.workspace()
+        for _ in range(2):
+            ceu.generate_with_project(client, workspace, 'Hello', shared, [], emit=emitted.append)
+        self.assertEqual(shared, {'materials/keep.txt'})
+        self.assertEqual(len(emitted), 1)
+        self.assertIn('Not shared: materials/notes.txt', emitted[0])
+        first = json.loads(self.requests[0].data)['messages'][0]['content']
+        self.assertIn('Still available', first)
+        self.assertNotIn('Old notes', first)
+        self.assertIn('The requested file does not exist.', first)
+        self.assertEqual(client.calls, 2)
+
     def test_local_runtime_retries_failed_install_and_reuses_success(self):
         script = self.file('ceu-api.py', '')
         runtime = self.root / '.ceu/runtime'
@@ -404,6 +464,7 @@ class AppTests(unittest.TestCase):
         with patch.object(ceu, '__file__', str(script)), \
              patch.object(ceu.sys, 'argv', [str(script), '--configure']), \
              patch.object(ceu.subprocess, 'run', side_effect=run) as command, \
+             patch.object(ceu, 'run_terminal_child', return_value=0) as launch, \
              contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(ceu.UserError, 'could not finish setup'):
                 ceu.launch_local_runtime(self.root)
@@ -412,10 +473,13 @@ class AppTests(unittest.TestCase):
             self.assertFalse((runtime.parent / 'config.json').exists())
             interrupted = False
             self.assertEqual(ceu.launch_local_runtime(self.root), 0)
-            self.assertEqual(command.call_count, 5)
+            self.assertEqual(command.call_count, 4)
+            launch.assert_called_once_with([str(interpreter), '-I', str(script), '--configure'])
             command.reset_mock()
+            launch.reset_mock()
             self.assertEqual(ceu.launch_local_runtime(self.root), 0)
-            command.assert_called_once_with([str(interpreter), '-I', str(script), '--configure'])
+            command.assert_not_called()
+            launch.assert_called_once_with([str(interpreter), '-I', str(script), '--configure'])
         self.assertIn('.ceu/', (self.root / '.gitignore').read_text())
 
     def test_local_runtime_missing_packages_do_not_relaunch_recursively(self):

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-11-23
+
+- Chat and PDF extraction use the same isolated Python environment. The original launch command also starts in isolation.
+- Folder permissions respect distinct names on case-sensitive filesystems.
+- Chat reports shared files that have moved or become unreadable and continues with the available files.
+
 ## 0.3.0 - 2026-11-23
 
 - Chat reads text from local PDFs and preserves page numbers in the context sent to CEU. The script reports scanned, encrypted or unreadable PDFs and explains how to proceed.

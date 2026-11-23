@@ -4,7 +4,7 @@
 
 No settings file or course guide is required. A fresh script uses `gemini-3.1-flash-lite`, permits reads and writes throughout the project, requires confirmation for existing-file changes and disables deletion. Files are inspected on demand, not uploaded in bulk.
 
-`python ceu-api.py --configure` chooses a model and optional instructions, then embeds public preferences in `SHARED_PREFERENCES` near the top of the same script. Share that script with students. Credentials are never embedded; they stay in each user's local `.ceu/config.json`. The previous script is backed up before updating its preferences.
+`python -I ceu-api.py --configure` chooses a model and optional instructions, then embeds public preferences in `SHARED_PREFERENCES` near the top of the same script. Share that script with students. Credentials are never embedded; they stay in each user's local `.ceu/config.json`. The previous script is backed up before updating its preferences.
 
 For advanced use, an optional `ceu-ai.json` beside the script overrides its embedded defaults. Omitted fields use the embedded preference or built-in default. This allows existing 0.1.0 settings to keep working. `--configure` updates a pre-existing settings file too, avoiding a stale model override. The optional `--guide` wizard creates a settings file and an AI-drafted `harness.md`.
 
@@ -56,7 +56,7 @@ Each chat call sends the application instructions plus a JSON description of:
 - Explicitly shared or model-requested file contents. Plain text, Markdown and source code are read as UTF-8. CSVs contribute a schema and up to five preview rows. Jupyter notebooks contribute saved contents, including saved outputs. PDFs contribute locally extracted text with page numbers.
 - Any previous read errors or the rejected response needed for a correction.
 
-Previously shared files are refreshed from disk on each user request. Successfully generated files join the context for follow-up requests. Long conversations resend history and can increase input-token usage; `/new` starts fresh. Requests stay in memory locally, but this says nothing about CEU/provider retention. Confirm data handling requirements with CEU IT.
+Previously shared files are refreshed from disk on each user request. Chat reports files that have moved or become unreadable and continues with the remaining files. Successfully generated files join the context for follow-up requests. Long conversations resend history and can increase input-token usage; `/new` starts fresh. Requests stay in memory locally, but this says nothing about CEU/provider retention. Confirm data handling requirements with CEU IT.
 
 The client ID and secret go in authentication headers, not the model prompt. The tool refuses to send the saved credential values if they appear in context and refuses to display or save them if returned by the model. This is not a general detector of every possible secret in a file.
 
@@ -111,4 +111,4 @@ These are application limits, not statements about CEU's model context windows o
 
 `--setup` replaces credentials only after checking the model catalogue. `--credentials PATH` imports the same JSON format and adds an exact ignore rule if the imported file is inside the project. A local import does not remove an earlier Git commit of that file. `--configure` embeds public model/instruction preferences in the script; `--guide` creates the optional guide and advanced settings. Both retain backups when replacing files.
 
-Releases are versioned. `python ceu-api.py --version` prints the installed version. Updating the script is a deliberate instructor action; there is no automatic download during class. A fresh generic script does not retain your embedded preferences: keep the previous script, then reapply the desired public settings before distribution.
+Releases are versioned. `python -I ceu-api.py --version` prints the installed version. Updating the script is a deliberate instructor action; there is no automatic download during class. A fresh generic script does not retain your embedded preferences: keep the previous script, then reapply the desired public settings before distribution.

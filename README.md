@@ -16,10 +16,10 @@ This is an independently maintained teaching tool, not an official CEU IT produc
 Use Python 3.11 or later on Windows, macOS or Linux. If your Python command is `python3` or `py`, use it in place of `python`. An ordinary terminal or VS Code's **Terminal > New Terminal** works.
 
 ```sh
-python ceu-api.py
+python -I ceu-api.py
 ```
 
-If required Python packages are missing, the script creates an environment under `.ceu/runtime`, installs the packages there, and continues automatically. The first download needs internet access and a Python installation with `venv`. If your current Python environment already has the packages, the script uses them.
+The `-I` flag keeps local project files from interfering with Python startup. If packages are missing in this mode, the script creates an environment under `.ceu/runtime`, installs the packages there, and continues automatically. The first download needs internet access and a Python installation with `venv`.
 
 Now type a request, for example:
 
@@ -35,7 +35,7 @@ The named source file must exist. You do not need to approve a list of filenames
 To choose the model students will use and optionally add project instructions:
 
 ```sh
-python ceu-api.py --configure
+python -I ceu-api.py --configure
 ```
 
 This lists the models available to your API account, asks for your choice and offers an optional instructions field. It makes no text-generation request. Press Enter to keep existing instructions or enter `-` to remove them.
@@ -98,17 +98,17 @@ Optional file import uses a privately supplied `ceu-credentials.json`:
 ```
 
 ```sh
-python ceu-api.py --credentials ceu-credentials.json
+python -I ceu-api.py --credentials ceu-credentials.json
 ```
 
-After successful import, delete the downloaded copy if desired; the local credential store remains. Replace expired credentials with `python ceu-api.py --setup`.
+After successful import, delete the downloaded copy if desired; the local credential store remains. Replace expired credentials with `python -I ceu-api.py --setup`.
 
 ## Optional advanced setup
 
 Folder restrictions, CSV profiles and an AI-drafted course guide are available **only if you want them**:
 
 ```sh
-python ceu-api.py --guide
+python -I ceu-api.py --guide
 ```
 
 This optional wizard creates `harness.md` and `ceu-ai.json`. If you choose this route, share those files too. Existing files from version 0.1.0 remain supported and their explicit folder restrictions are preserved. An optional `ceu-ai.json` overrides the script's embedded defaults; `--configure` updates an existing settings file as well as the script so the selected model stays consistent.

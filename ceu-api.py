@@ -2,11 +2,37 @@
 # requires-python = ">=3.11"
 # dependencies = ["prompt-toolkit==3.0.52", "nbformat==5.10.4", "pandas==3.0.3", "pypdf==7.1.1"]
 # ///
-"""CEU AI for project folders. Run with python ceu-api.py.
+"""CEU AI for project folders. Run with python -I ceu-api.py.
 
 Copyright (c) 2026 Ulrich Wohak. Distributed under the MIT License.
 """
 from __future__ import annotations
+
+import sys
+
+
+def run_terminal_child(command: list[str]) -> int:
+    import subprocess
+
+    with subprocess.Popen(command) as child:
+        while True:
+            try:
+                return child.wait()
+            except KeyboardInterrupt:
+                # The terminal also sends Ctrl-C to the interactive child.
+                continue
+
+
+# Keep the original launch command working. Remove the default script directory
+# before importing anything for the isolated relaunch.
+if __name__ == "__main__" and not sys.flags.isolated:
+    if not getattr(sys.flags, "safe_path", False):
+        sys.path.pop(0)
+    import os
+
+    project_paths = {os.path.realpath(os.curdir), os.path.dirname(os.path.realpath(__file__))}
+    sys.path[:] = [entry for entry in sys.path if os.path.realpath(entry) not in project_paths]
+    raise SystemExit(run_terminal_child([sys.executable, "-I", *sys.argv]))
 
 import argparse
 import ast
@@ -20,8 +46,8 @@ import pprint
 import re
 import socket
 import subprocess
-import sys
 import tempfile
+import unicodedata
 import uuid
 import warnings
 from dataclasses import dataclass, field, asdict
@@ -30,7 +56,7 @@ from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 API_URL = "https://ceu-api.academic-ai.at"
 SUGGESTED_MODEL = "gemini-3.1-flash-lite"
 PDF_PARSER_VERSION = "7.1.1"
@@ -195,7 +221,8 @@ class Settings:
                     raise UserError("Automatic dataset profiles support CSV files only.")
         if not self.output_paths:
             raise UserError("Specify at least one output folder.")
-        if any(not covered(name, self.context_paths) or excluded_path(name, set(self.exclude_paths)) for name in self.data_paths):
+        if any(not covered(root, name, self.context_paths) or excluded_path(root, name, self.exclude_paths)
+               for name in self.data_paths):
             raise UserError("Every profiled dataset must be inside the permitted context and outside exclusions.")
         for name in self.output_paths:
             if name == ".":
@@ -207,13 +234,34 @@ class Settings:
                 raise UserError("An output folder points to an existing file.")
 
 
-def covered(name: str, roots: list[str]) -> bool:
-    name = name.casefold().rstrip("/")
-    return any(p == "." or name == p.casefold().rstrip("/") or name.startswith(p.casefold().rstrip("/") + "/") for p in roots)
+def covered(root: Path, name: str, scopes: list[str] | set[str], *, excluding: bool = False) -> bool:
+    for scope in scopes:
+        if scope == "." or name == scope or name.startswith(scope + "/"):
+            return True
+        prefix = "/".join(name.split("/")[:len(scope.split("/"))])
+        if unicodedata.normalize("NFC", prefix).casefold() != unicodedata.normalize("NFC", scope).casefold():
+            continue
+        # Alternate spellings are valid only when the filesystem resolves them
+        # to the same entry. Case-folding alone would allow a sibling on Linux.
+        candidate, allowed = root / prefix, root / scope
+        try:
+            if not candidate.samefile(allowed) or not candidate.parent.samefile(allowed.parent):
+                continue
+            if candidate.name != allowed.name:
+                names = {entry.name for entry in allowed.parent.iterdir()}
+                if candidate.name in names and allowed.name in names:
+                    continue
+            return True
+        except OSError:
+            # A case variant of a missing or inaccessible exclusion must not
+            # become a new output just because there is no entry to compare.
+            if excluding:
+                return True
+    return False
 
 
-def excluded_path(name: str, excluded: set[str]) -> bool:
-    return covered(name, list(excluded))
+def excluded_path(root: Path, name: str, scopes: list[str] | set[str]) -> bool:
+    return covered(root, name, scopes, excluding=True)
 
 
 def is_course_guide(name: str) -> bool:
@@ -829,10 +877,10 @@ class Workspace:
 
     def path(self, name: str, *, writing=False) -> Path:
         path = local_path(self.root, name, writing=writing)
-        if excluded_path(name, self.excluded):
+        if excluded_path(self.root, name, self.excluded):
             raise UserError("This path is excluded from the assistant.")
         roots = self.settings.output_paths if writing else self.settings.context_paths + self.settings.output_paths
-        if not covered(name, roots) and not (not writing and name == HARNESS_FILE):
+        if not covered(self.root, name, roots) and not (not writing and name == HARNESS_FILE):
             raise UserError("This path is outside the configured " + ("output folders." if writing else "context folders."))
         if writing and (name in self.settings.data_paths or (path.exists() and path.suffix.lower() == ".csv")):
             raise UserError("Existing datasets are read-only.")
@@ -856,9 +904,9 @@ class Workspace:
                     local_path(self.root, relative, directory=True)
                 except UserError:
                     continue
-                if excluded_path(relative, self.excluded):
+                if excluded_path(self.root, relative, self.excluded):
                     continue
-                if covered(relative, roots) or any(p.startswith(relative + "/") for p in roots):
+                if covered(self.root, relative, roots) or any(covered(self.root, p, [relative]) for p in roots):
                     permitted.append(name)
             directories[:] = permitted
             for name, directory in [(n, True) for n in permitted] + [(n, False) for n in sorted(files)]:
@@ -877,7 +925,7 @@ class Workspace:
 
     def course_context(self) -> dict:
         guide = {"path": HARNESS_FILE, "status": "excluded"}
-        if not excluded_path(HARNESS_FILE, self.excluded):
+        if not excluded_path(self.root, HARNESS_FILE, self.excluded):
             path = self.path(HARNESS_FILE)
             if not path.exists():
                 guide["status"] = "not_provided"
@@ -890,7 +938,7 @@ class Workspace:
                     raise UserError("Cannot read harness.md as UTF-8 text.") from None
         datasets = []
         for name in self.settings.data_paths:
-            if excluded_path(name, self.excluded):
+            if excluded_path(self.root, name, self.excluded):
                 continue
             try:
                 entry = {"path": name, "status": "available", **csv_profile(self.path(name), include_preview=False)}
@@ -921,12 +969,29 @@ class Workspace:
 
 def generate_with_project(client: CEUClient, workspace: Workspace, prompt: str,
                           shared: set[str], history: list[dict], emit=print) -> tuple[dict, dict]:
-    context = workspace.read({n for n in shared if not excluded_path(n, workspace.excluded)})
+    errors = []
+
+    def record_read_error(name: str, exc: UserError | OSError) -> None:
+        reason = str(exc) if isinstance(exc, UserError) else "The file could not be read."
+        errors.append({"path": name, "error": reason})
+        emit(display(f"Not shared: {name}. {reason}"))
+
+    context = {}
+    for name in sorted(shared):
+        if excluded_path(workspace.root, name, workspace.excluded):
+            shared.discard(name)
+            continue
+        try:
+            context.update(workspace.read({name}))
+        except (UserError, OSError) as exc:
+            shared.discard(name)
+            record_read_error(name, exc)
+    if sum(len(text.encode("utf-8")) for text in context.values()) > MAX_CONTEXT:
+        raise UserError("The shared files are too large. Use /drop to remove some.")
     course = workspace.course_context()
     correction = None
     source_destinations = None
     repaired = False
-    errors = []
     for round_number in range(MAX_READ_ROUNDS + 1):
         payload = {"request": prompt, "conversation": history, "shared_files": context,
                    "course": course, "project": workspace.tree(), "settings": asdict(workspace.settings),
@@ -966,9 +1031,7 @@ def generate_with_project(client: CEUClient, workspace: Workspace, prompt: str,
                 if sum(len(v.encode("utf-8")) for v in (context | added).values()) > MAX_CONTEXT:
                     raise UserError("The selected files exceed the context limit.")
             except (UserError, OSError) as exc:
-                reason = str(exc) if isinstance(exc, UserError) else "The file could not be read."
-                errors.append({"path": requested, "error": reason})
-                emit(display(f"Not shared: {requested}. {reason}"))
+                record_read_error(requested, exc)
                 continue
             context.update(added)
             shared.add(name)
@@ -1120,7 +1183,7 @@ def draft_guide(client: CEUClient, workspace: Workspace, answers: dict) -> str:
     references = {}
     datasets = []
     for name in workspace.settings.context_paths:
-        if name != "." and not excluded_path(name, workspace.excluded):
+        if name != "." and not excluded_path(workspace.root, name, workspace.excluded):
             path = local_path(workspace.root, name, directory=True)
             if path.is_file() and path.suffix.lower() in {".md", ".txt"}:
                 references.update(workspace.read({name}))
@@ -1303,7 +1366,7 @@ def run_chat(client: CEUClient, workspace: Workspace, ask) -> None:
                 name = workspace.name(argument.strip().strip('"'))
                 if command == "/drop":
                     workspace.excluded.add(name)
-                    shared.difference_update(n for n in list(shared) if excluded_path(n, workspace.excluded))
+                    shared.difference_update(n for n in list(shared) if excluded_path(workspace.root, n, workspace.excluded))
                     print("Excluded for the rest of this session. /new does not erase previously sent data.")
                 else:
                     if name in workspace.settings.exclude_paths:
@@ -1381,7 +1444,7 @@ def launch_local_runtime(root: Path) -> int:
             lock.rmdir()
 
     command = [str(python), "-I", str(Path(__file__).absolute()), *sys.argv[1:]]
-    return subprocess.run(command).returncode
+    return run_terminal_child(command)
 
 
 def main() -> int:

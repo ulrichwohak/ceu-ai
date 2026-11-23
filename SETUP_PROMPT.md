@@ -1,7 +1,7 @@
 # Optional guide-generation prompt
 
 Normal startup only asks for credentials and opens chat. For an optional AI-drafted
-course guide and folder restrictions, run `python ceu-api.py --guide`. To resume
+course guide and folder restrictions, run `python -I ceu-api.py --guide`. To resume
 unfinished guide setup, use `--guide` again.
 
 The application asks for the audience, intended tasks, working rules, approved

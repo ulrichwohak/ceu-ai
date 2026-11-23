@@ -22,4 +22,4 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install prompt-toolkit==3.0.52 nbformat==5.10.4 pandas==3.0.3 pypdf==7.1.1
       - run: python -m unittest discover -s tests -v
-      - run: python ceu-api.py --help
+      - run: python -I ceu-api.py --help
