@@ -8,6 +8,8 @@ This is an independently maintained teaching tool, not an official CEU IT produc
 
 ## Start
 
+[One-page getting-started guide (PDF)](docs/CEU-AI-Getting-Started.pdf)
+
 1. Obtain a CEU API client ID, secret and API allowance from CEU IT. The Academic AI website allowance is separate from the API budget.
 2. Download **[ceu-api.py](https://github.com/ulrichwohak/ceu-ai/releases/latest/download/ceu-api.py)** into the **root (top-level folder)** of your course or project.
 3. Open a terminal in that folder and run the command below.
