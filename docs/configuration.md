@@ -4,7 +4,7 @@
 
 No settings file or course guide is required. A fresh script uses `gemini-3.1-flash-lite`, permits reads and writes throughout the project, requires confirmation for existing-file changes and disables deletion. Files are inspected on demand, not uploaded in bulk.
 
-`python -I ceu-api.py --configure` chooses a model and optional instructions, then embeds public preferences in `SHARED_PREFERENCES` near the top of the same script. Share that script with students. Credentials are never embedded; they stay in each user's local `.ceu/config.json`. The previous script is backed up before updating its preferences.
+`python ceu-api.py --configure` chooses a model and optional instructions, then embeds public preferences in `SHARED_PREFERENCES` near the top of the same script. Share that script with students. Credentials are never embedded; they stay in each user's local `.ceu/config.json`. The previous script is backed up before updating its preferences.
 
 For advanced use, an optional `ceu-ai.json` beside the script overrides its embedded defaults. Omitted fields use the embedded preference or built-in default. This allows existing 0.1.0 settings to keep working. `--configure` updates a pre-existing settings file too, avoiding a stale model override. The optional `--guide` wizard creates a settings file and an AI-drafted `harness.md`.
 
@@ -111,4 +111,4 @@ These are application limits, not statements about CEU's model context windows o
 
 `--setup` replaces credentials only after checking the model catalogue. `--credentials PATH` imports the same JSON format and adds an exact ignore rule if the imported file is inside the project. A local import does not remove an earlier Git commit of that file. `--configure` embeds public model/instruction preferences in the script; `--guide` creates the optional guide and advanced settings. Both retain backups when replacing files.
 
-Releases are versioned. `python -I ceu-api.py --version` prints the installed version. Updating the script is a deliberate instructor action; there is no automatic download during class. A fresh generic script does not retain your embedded preferences: keep the previous script, then reapply the desired public settings before distribution.
+Releases are versioned. `python ceu-api.py --version` prints the installed version. Updating the script is a deliberate instructor action; there is no automatic download during class. A fresh generic script does not retain your embedded preferences: keep the previous script, then reapply the desired public settings before distribution.

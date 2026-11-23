@@ -383,21 +383,19 @@ class AppTests(unittest.TestCase):
 
     def test_help_and_version_work_without_credentials_or_terminal(self):
         for option in ('--help', '--version'):
-            result = subprocess.run([sys.executable, '-I', str(Path(ceu.__file__)), option], capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(Path(ceu.__file__)), option], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_launch_ignores_project_files_named_like_python_modules(self):
         script = self.root / 'ceu-api.py'
         script.write_bytes(Path(ceu.__file__).read_bytes())
-        self.file('socket.py', '# An unrelated file in the course folder.\n')
+        for name in ('socket.py', 'subprocess.py'):
+            self.file(name, '# An unrelated file in the course folder.\n')
         options = {'cwd': self.root, 'env': {**os.environ, 'PYTHONPATH': str(self.root)},
                    'capture_output': True, 'text': True, 'timeout': 10}
-        result = subprocess.run([sys.executable, '-I', str(script), '--version'], **options)
+        result = subprocess.run([sys.executable, str(script), '--version'], **options)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), ceu.VERSION)
-        result = subprocess.run([sys.executable, str(script), '--version'], **options)
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('python -I ceu-api.py', result.stderr)
 
     def test_folder_permissions_follow_the_filesystem(self):
         allowed = 'materials/Readings/notes.txt'

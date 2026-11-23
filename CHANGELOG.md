@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3 - 2026-11-23
+
+- Run `python ceu-api.py` to start chat with PDF reading and the other file features. The script handles Python isolation and package setup automatically.
+
 ## 0.3.2 - 2026-11-23
 
 - Use `python -I ceu-api.py` to set up and open chat with PDF reading and the other file features available in the same session.

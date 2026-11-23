@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["prompt-toolkit==3.0.52", "nbformat==5.10.4", "pandas==3.0.3", "pypdf==7.1.1"]
 # ///
-"""CEU AI for project folders. Run with python -I ceu-api.py.
+"""CEU AI for project folders. Run with python ceu-api.py.
 
 Copyright (c) 2026 Ulrich Wohak. Distributed under the MIT License.
 """
@@ -10,10 +10,29 @@ from __future__ import annotations
 
 import sys
 
-# Check this before importing modules that a project file could shadow.
+
+def run_terminal_child(command: list[str]) -> int:
+    import subprocess
+
+    with subprocess.Popen(command) as child:
+        while True:
+            try:
+                return child.wait()
+            except KeyboardInterrupt:
+                # The terminal also sends Ctrl-C to the interactive child.
+                continue
+
+
+# Start the app and its PDF worker in the same isolated mode. Remove the script
+# directory before importing anything for this relaunch.
 if __name__ == "__main__" and not sys.flags.isolated:
-    print("Run CEU AI with: python -I ceu-api.py", file=sys.stderr)
-    raise SystemExit(2)
+    if not getattr(sys.flags, "safe_path", False) and sys.path:
+        sys.path.pop(0)
+    import os
+
+    project_paths = {os.path.realpath(os.curdir), os.path.dirname(os.path.realpath(__file__))}
+    sys.path[:] = [entry for entry in sys.path if os.path.realpath(entry) not in project_paths]
+    raise SystemExit(run_terminal_child([sys.executable, "-I", *sys.argv]))
 
 import argparse
 import ast
@@ -37,7 +56,7 @@ from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 API_URL = "https://ceu-api.academic-ai.at"
 SUGGESTED_MODEL = "gemini-3.1-flash-lite"
 PDF_PARSER_VERSION = "7.1.1"
@@ -1379,16 +1398,6 @@ def run_chat(client: CEUClient, workspace: Workspace, ask) -> None:
             print("\nCancelled. Type /quit to exit.")
         finally:
             client.report_usage(before)
-
-
-def run_terminal_child(command: list[str]) -> int:
-    with subprocess.Popen(command) as child:
-        while True:
-            try:
-                return child.wait()
-            except KeyboardInterrupt:
-                # The terminal also sends Ctrl-C to the interactive child.
-                continue
 
 
 def launch_local_runtime(root: Path) -> int:
