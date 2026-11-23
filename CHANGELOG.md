@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 - 2026-11-23
+
+- Running the script sets up missing Python packages in a local environment on first use.
+
 ## 0.2.1 - 2026-11-23
 
 - Setup instructions and automated checks use standard Python and pip on Windows, macOS and Linux.

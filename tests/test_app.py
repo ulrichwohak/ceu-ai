@@ -386,6 +386,46 @@ class AppTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(Path(ceu.__file__)), option], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_local_runtime_retries_failed_install_and_reuses_success(self):
+        script = self.file('ceu-api.py', '')
+        runtime = self.root / '.ceu/runtime'
+        interpreter = runtime / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+        interrupted = True
+
+        def run(command, *, check=False):
+            if command[1:4] == ['-I', '-m', 'venv']:
+                interpreter.parent.mkdir(parents=True, exist_ok=True)
+                interpreter.touch()
+            elif command[1:4] == ['-I', '-m', 'pip']:
+                if interrupted:
+                    raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(ceu, '__file__', str(script)), \
+             patch.object(ceu.sys, 'argv', [str(script), '--configure']), \
+             patch.object(ceu.subprocess, 'run', side_effect=run) as command, \
+             contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ceu.UserError, 'could not finish setup'):
+                ceu.launch_local_runtime(self.root)
+            self.assertFalse((runtime / '.packages').exists())
+            self.assertFalse((runtime.parent / 'runtime-setup.lock').exists())
+            self.assertFalse((runtime.parent / 'config.json').exists())
+            interrupted = False
+            self.assertEqual(ceu.launch_local_runtime(self.root), 0)
+            self.assertEqual(command.call_count, 5)
+            command.reset_mock()
+            self.assertEqual(ceu.launch_local_runtime(self.root), 0)
+            command.assert_called_once_with([str(interpreter), '-I', str(script), '--configure'])
+        self.assertIn('.ceu/', (self.root / '.gitignore').read_text())
+
+    def test_local_runtime_missing_packages_do_not_relaunch_recursively(self):
+        runtime = self.root / '.ceu/runtime'
+        with patch.object(ceu.sys, 'prefix', str(runtime)), \
+             patch.object(ceu.subprocess, 'run') as command:
+            with self.assertRaisesRegex(ceu.UserError, 'Could not load packages'):
+                ceu.launch_local_runtime(self.root)
+            command.assert_not_called()
+
     def test_non_python_notebook_is_not_misrepresented_as_validated_python(self):
         nb = {'cells': [], 'metadata': {'kernelspec': {'name': 'ir', 'display_name': 'R', 'language': 'R'}},
               'nbformat': 4, 'nbformat_minor': 5}

@@ -10,17 +10,16 @@ This is an independently maintained teaching tool, not an official CEU IT produc
 
 1. Obtain a CEU API client ID, secret and API allowance from CEU IT. The Academic AI website allowance is separate from the API budget.
 2. Download **[ceu-api.py](https://github.com/ulrichwohak/ceu-ai/releases/latest/download/ceu-api.py)** into the **root (top-level folder)** of your course or project.
-3. Open a terminal in that folder and follow the Python commands below.
-4. Enter the client ID and secret. Secret input is hidden. Chat opens immediately; later runs reuse your locally saved credentials.
+3. Open a terminal in that folder and run the command below.
+4. Enter the client ID and secret when prompted. Secret input is hidden. Later runs reuse your locally saved credentials.
 
-Use Python 3.11 or later on Windows, macOS, or Linux. Activate your project's Python environment, install the dependencies once, and start the tool.
+Use Python 3.11 or later on Windows, macOS or Linux. If your Python command is `python3` or `py`, use it in place of `python`. An ordinary terminal or VS Code's **Terminal > New Terminal** works.
 
 ```sh
-python -m pip install prompt-toolkit==3.0.52 nbformat==5.10.4 pandas==3.0.3
 python ceu-api.py
 ```
 
-If your Python command is `python3` or `py`, use it in place of `python` in both lines. If you need to create a project environment, follow the [Python environment instructions](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/). An ordinary terminal or VS Code's **Terminal > New Terminal** works.
+If required Python packages are missing, the script creates an environment under `.ceu/runtime`, installs the packages there, and continues automatically. The first download needs internet access and a Python installation with `venv`. If your current Python environment already has the packages, the script uses them.
 
 Now type a request, for example:
 
@@ -43,7 +42,7 @@ This lists the models available to your API account, asks for your choice and of
 
 The selected preferences are written into the `SHARED_PREFERENCES` block near the top of **that same script**. Your credentials remain separate in `.ceu/config.json`; they are never written into the shared script. A local backup preserves the previous script.
 
-Share your configured `ceu-api.py` with students, either in the course repository or through the course platform. Students place it in the **root of their own project folder**, install the dependencies if necessary and run it. They enter credentials once and inherit your model and instructions. They do not need to configure the course or download extra settings files.
+Share your configured `ceu-api.py` with students, either in the course repository or through the course platform. Students place it in the **root of their own project folder** and run it. They enter credentials once and inherit your model and instructions. They do not need to configure the course or download extra settings files.
 
 Without instructor preferences, the default model is `gemini-3.1-flash-lite`. If it is unavailable for the account, the app stops with an explanation; it never silently switches models. Use `--configure` to choose another available model and confirm current rates with IT.
 
@@ -109,9 +108,10 @@ You can also edit `SHARED_PREFERENCES` or provide an optional `harness.md` manua
 
 Updating is deliberate: a fresh generic download does not contain your instructor customisations. Keep the previous script and reapply its public preferences before sharing an update. Version 0.1.0 used the filename `ceu-ai.py`; current releases also include that name as a compatibility download of the same application. Use `ceu-api.py` for new projects.
 
-Install the dependencies as shown above, then run the tests from the repository root.
+Activate a development environment and run the following commands from the repository root.
 
 ```sh
+python -m pip install prompt-toolkit==3.0.52 nbformat==5.10.4 pandas==3.0.3
 python -m unittest discover -s tests -v
 ```
 

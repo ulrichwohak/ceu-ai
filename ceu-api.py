@@ -18,6 +18,7 @@ import os
 import pprint
 import re
 import socket
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -28,9 +29,10 @@ from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 API_URL = "https://ceu-api.academic-ai.at"
 SUGGESTED_MODEL = "gemini-3.1-flash-lite"
+REQUIREMENTS = ("prompt-toolkit==3.0.52", "nbformat==5.10.4", "pandas==3.0.3")
 
 # BEGIN SHARED PREFERENCES
 SHARED_PREFERENCES = {}
@@ -1238,6 +1240,53 @@ def run_chat(client: CEUClient, workspace: Workspace, ask) -> None:
             client.report_usage(before)
 
 
+def launch_local_runtime(root: Path) -> int:
+    """Install missing packages in a private environment, then run the same command there."""
+    state = root / ".ceu"
+    runtime = state / "runtime"
+    if runtime.is_symlink() or runtime.resolve() != runtime:
+        raise UserError("The .ceu/runtime folder must be inside your project and cannot be a symbolic link.")
+    if Path(sys.prefix).resolve() == runtime:
+        raise UserError("Could not load packages from .ceu/runtime. Remove that folder and run the script again.")
+
+    python = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if python.parent.resolve() != python.parent:
+        raise UserError("The .ceu/runtime Python folder cannot be a symbolic link.")
+    stamp = runtime / ".packages"
+    expected = "\n".join(REQUIREMENTS) + "\n"
+
+    def ready() -> bool:
+        if stamp.is_symlink():
+            raise UserError("The .ceu/runtime package record cannot be a symbolic link.")
+        return python.is_file() and stamp.is_file() and stamp.read_text(encoding="utf-8") == expected
+
+    if not ready():
+        ensure_gitignore(root)
+        private_directory(state)
+        lock = state / "runtime-setup.lock"
+        try:
+            lock.mkdir()
+        except FileExistsError:
+            raise UserError("Finish setup in the other terminal, then try again. If setup was interrupted "
+                            "and has stopped, remove .ceu/runtime-setup.lock and run the script again.") from None
+        try:
+            if not ready():
+                stamp.unlink(missing_ok=True)
+                print("Setting up CEU AI for this project. The first download may take a minute.", flush=True)
+                subprocess.run([sys.executable, "-I", "-m", "venv", str(runtime)], check=True)
+                subprocess.run([str(python), "-I", "-m", "pip", "install", "--no-input",
+                                "--disable-pip-version-check", *REQUIREMENTS], check=True)
+                atomic_text(stamp, expected)
+        except subprocess.CalledProcessError:
+            raise UserError("Python could not finish setup. Check the error above, your internet connection, "
+                            "and that your Python installation supports venv, then run the script again.") from None
+        finally:
+            lock.rmdir()
+
+    command = [str(python), "-I", str(Path(__file__).absolute()), *sys.argv[1:]]
+    return subprocess.run(command).returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="CEU AI for course and project folders.")
     parser.add_argument("--version", action="version", version=VERSION)
@@ -1247,6 +1296,9 @@ def main() -> int:
     preferences.add_argument("--guide", action="store_true", help="optional advanced course guide and folder restrictions")
     parser.add_argument("--credentials", type=Path, help="import a privately supplied JSON credentials file")
     args = parser.parse_args()
+    if sys.version_info < (3, 11):
+        print("CEU AI needs Python 3.11 or later.", file=sys.stderr)
+        return 1
     if not sys.stdin.isatty():
         print("Run this script from an interactive terminal in your project's root folder.", file=sys.stderr)
         return 1
@@ -1255,17 +1307,14 @@ def main() -> int:
         print("Put the script in your project's root folder and run it from that folder.", file=sys.stderr)
         return 1
     try:
-        from prompt_toolkit import PromptSession
-        import nbformat
-        import pandas
-    except ImportError:
-        print("Could not load the required Python packages. In your project environment, run:\n"
-              "  python -m pip install prompt-toolkit==3.0.52 nbformat==5.10.4 pandas==3.0.3",
-              file=sys.stderr)
-        return 1
-    session = PromptSession()
-    ask = session.prompt
-    try:
+        try:
+            from prompt_toolkit import PromptSession
+            import nbformat
+            import pandas
+        except ImportError:
+            return launch_local_runtime(root)
+        session = PromptSession()
+        ask = session.prompt
         client = credentials_for(root, ask, read_secret, force=args.setup, import_path=args.credentials)
         if args.configure:
             configure_preferences(root, client, ask)
