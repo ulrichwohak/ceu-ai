@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 - 2026-11-23
+
+- Setup instructions and automated checks use standard Python and pip on Windows, macOS and Linux.
+- The startup message gives a pip command when required packages cannot be imported.
+
 ## 0.2.0 - 2026-11-23
 
 - Normal startup asks for credentials and opens chat; no role prompt, course guide or settings file is required.
@@ -7,7 +12,7 @@
 - Optional `--configure` saves a default model and instructions inside the single distributable script. Credentials stay in the local `.ceu` folder.
 - The old guide/folder wizard is optional under `--guide`; existing explicit course settings remain supported.
 - Main download renamed to `ceu-api.py`, with `ceu-ai.py` retained as an identical compatibility release asset.
-- Plain Python and ordinary terminals are documented; uv and VS Code are optional.
+- Setup supports plain Python and ordinary terminals.
 
 ## 0.1.0 — 2026-11-20
 

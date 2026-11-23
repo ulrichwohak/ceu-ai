@@ -10,25 +10,17 @@ This is an independently maintained teaching tool, not an official CEU IT produc
 
 1. Obtain a CEU API client ID, secret and API allowance from CEU IT. The Academic AI website allowance is separate from the API budget.
 2. Download **[ceu-api.py](https://github.com/ulrichwohak/ceu-ai/releases/latest/download/ceu-api.py)** into the **root (top-level folder)** of your course or project.
-3. Open a terminal in that folder and run the script using one of the options below.
+3. Open a terminal in that folder and follow the Python commands below.
 4. Enter the client ID and secret. Secret input is hidden. Chat opens immediately; later runs reuse your locally saved credentials.
 
-**With Python:** use Python 3.11 or later in your project's Python environment. Install the dependencies once, then start:
+Use Python 3.11 or later on Windows, macOS, or Linux. Activate your project's Python environment, install the dependencies once, and start the tool.
 
 ```sh
 python -m pip install prompt-toolkit==3.0.52 nbformat==5.10.4 pandas==3.0.3
 python ceu-api.py
 ```
 
-Use `python3` instead of `python` if that is your Python command. If you do not have a project environment, follow the [Python environment instructions](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/) or use uv below.
-
-**With uv (optional):** [install uv](https://docs.astral.sh/uv/getting-started/installation/) and reopen the terminal, then run:
-
-```sh
-uv run ceu-api.py
-```
-
-uv manages the dependencies and can download a suitable Python version. Its first launch needs internet access. VS Code is optional: its **Terminal > New Terminal** menu is simply another way to open a terminal.
+If your Python command is `python3` or `py`, use it in place of `python` in both lines. If you need to create a project environment, follow the [Python environment instructions](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/). An ordinary terminal or VS Code's **Terminal > New Terminal** works.
 
 Now type a request, for example:
 
@@ -47,7 +39,7 @@ To choose the model students will use and optionally add project instructions:
 python ceu-api.py --configure
 ```
 
-Or use `uv run ceu-api.py --configure`. This lists the models available to your API account, asks for your choice and offers an optional instructions field. It makes no text-generation request. Press Enter to keep existing instructions or enter `-` to remove them.
+This lists the models available to your API account, asks for your choice and offers an optional instructions field. It makes no text-generation request. Press Enter to keep existing instructions or enter `-` to remove them.
 
 The selected preferences are written into the `SHARED_PREFERENCES` block near the top of **that same script**. Your credentials remain separate in `.ceu/config.json`; they are never written into the shared script. A local backup preserves the previous script.
 
@@ -117,11 +109,10 @@ You can also edit `SHARED_PREFERENCES` or provide an optional `harness.md` manua
 
 Updating is deliberate: a fresh generic download does not contain your instructor customisations. Keep the previous script and reapply its public preferences before sharing an update. Version 0.1.0 used the filename `ceu-ai.py`; current releases also include that name as a compatibility download of the same application. Use `ceu-api.py` for new projects.
 
-To work on this repository:
+Install the dependencies as shown above, then run the tests from the repository root.
 
 ```sh
-uv sync --locked
-uv run python -m unittest discover -s tests -v
+python -m unittest discover -s tests -v
 ```
 
 Tests use temporary folders and mock API responses; no credentials or paid calls are required. CI covers Linux, macOS and Windows on Python 3.11 and 3.13. MIT licensed; see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).

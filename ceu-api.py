@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["prompt-toolkit==3.0.52", "nbformat==5.10.4", "pandas==3.0.3"]
 # ///
-"""CEU AI for project folders. Run: python ceu-api.py (or uv run ceu-api.py).
+"""CEU AI for project folders. Run with python ceu-api.py.
 
 Copyright (c) 2026 Ulrich Wohak. Distributed under the MIT License.
 """
@@ -28,7 +28,7 @@ from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 API_URL = "https://ceu-api.academic-ai.at"
 SUGGESTED_MODEL = "gemini-3.1-flash-lite"
 
@@ -1259,7 +1259,9 @@ def main() -> int:
         import nbformat
         import pandas
     except ImportError:
-        print("Install prompt-toolkit, nbformat and pandas in your Python environment, or start with uv run " + Path(__file__).name, file=sys.stderr)
+        print("Could not load the required Python packages. In your project environment, run:\n"
+              "  python -m pip install prompt-toolkit==3.0.52 nbformat==5.10.4 pandas==3.0.3",
+              file=sys.stderr)
         return 1
     session = PromptSession()
     ask = session.prompt
